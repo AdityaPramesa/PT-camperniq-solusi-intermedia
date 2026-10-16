@@ -3,135 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Riwayat & Rekapitulasi Transaksi - SI-MONI</title>
+    <title>Riwayat Transaksi - PT Camperniq Solusi Intermedia</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        @media print {
-            .no-print { display: none !important; }
-            .card { border: none !important; box-shadow: none !important; }
-        }
+        html, body { max-width: 100%; overflow-x: hidden; }
     </style>
 </head>
 <body class="bg-light">
 
     <!-- Header Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm mb-4 no-print">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
         <div class="container">
             <a class="navbar-brand fw-bold" href="{{ url('/') }}">
-                🏢 SI-MONI <span class="fs-6 fw-normal">| PT Camperniq Solusi Intermedia</span>
+                🏢 PT Camperniq Solusi Intermedia
             </a>
-            <div class="d-flex align-items-center gap-2">
-                <a href="{{ url('/') }}" class="btn btn-light btn-sm fw-bold">← Dashboard</a>
-                <a href="{{ url('/transaksi/create') }}" class="btn btn-success btn-sm fw-bold">+ Transaksi Baru</a>
+            <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarRiwayat">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse mt-2 mt-lg-0" id="navbarRiwayat">
+                <div class="d-flex flex-column flex-lg-row align-items-lg-center ms-auto gap-2">
+                    <a href="{{ url('/') }}" class="btn btn-light btn-sm fw-bold text-dark">← Dashboard</a>
+                    <a href="{{ url('/transaksi/create') }}" class="btn btn-success btn-sm fw-bold">+ Transaksi Baru</a>
+                    <a href="{{ url('/logout') }}" class="btn btn-danger btn-sm fw-bold mt-2 mt-lg-0 ms-lg-2" onclick="return confirm('Apakah Anda yakin ingin keluar?')">🚪 Logout</a>
+                </div>
             </div>
         </div>
     </nav>
 
-    <div class="container mb-5">
+    <div class="container my-4">
 
         @if(session('success'))
-            <div class="alert alert-success alert-dismissible fade show mb-3 no-print" role="alert">
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
                 ✅ {{ session('success') }}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         @endif
 
-        <!-- Card Widget Rekapitulasi Finansial Bulanan -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="card border-0 shadow-sm bg-primary text-white h-100">
-                    <div class="card-body p-3">
-                        <small class="text-white-50 text-uppercase fw-bold">🛒 Total Pengeluaran Belanja (Barang Masuk)</small>
-                        <h3 class="fw-bold my-1">Rp {{ number_format($totalPengeluaranBulanIni ?? 0, 0, ',', '.') }}</h3>
-                        <small class="text-white-50">Periode: {{ $namaBulanPilihan }} {{ $tahunPilihan }}</small>
-                    </div>
-                </div>
+        @if(session('error'))
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                ❌ {{ session('error') }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
-            <div class="col-md-4">
-                <div class="card border-0 shadow-sm bg-success text-white h-100">
-                    <div class="card-body p-3">
-                        <small class="text-white-50 text-uppercase fw-bold">📥 Total Qty Barang Masuk</small>
-                        <h3 class="fw-bold my-1">{{ number_format($totalQtyMasukBulanIni ?? 0, 0, ',', '.') }} Item</h3>
-                        <small class="text-white-50">Periode: {{ $namaBulanPilihan }} {{ $tahunPilihan }}</small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card border-0 shadow-sm bg-danger text-white h-100">
-                    <div class="card-body p-3">
-                        <small class="text-white-50 text-uppercase fw-bold">📤 Total Qty Barang Keluar</small>
-                        <h3 class="fw-bold my-1">{{ number_format($totalQtyKeluarBulanIni ?? 0, 0, ',', '.') }} Item</h3>
-                        <small class="text-white-50">Periode: {{ $namaBulanPilihan }} {{ $tahunPilihan }}</small>
-                    </div>
-                </div>
-            </div>
-        </div>
+        @endif
 
-        <!-- Card Filter Periode, Search & Export Server-Side -->
-        <div class="card shadow-sm border-0 mb-4 no-print">
+        <!-- Card Filter Lengkap -->
+        <div class="card shadow-sm border-0 mb-4">
             <div class="card-body p-3">
-                <form action="{{ url('/riwayat') }}" method="GET" class="row g-2 align-items-center mb-3 border-bottom pb-3">
-                    <div class="col-md-3">
-                        <label class="form-label fw-bold small mb-1">Pilih Bulan Rekapan</label>
-                        <select name="bulan" class="form-select form-select-sm">
-                            @php
-                                $bulans = [
-                                    '01' => 'Januari', '02' => 'Februari', '03' => 'Maret', '04' => 'April',
-                                    '05' => 'Mei', '06' => 'Juni', '07' => 'Juli', '08' => 'Agustus',
-                                    '09' => 'September', '10' => 'Oktober', '11' => 'November', '12' => 'Desember'
-                                ];
-                            @endphp
-                            @foreach($bulans as $key => $val)
-                                <option value="{{ $key }}" {{ ($bulanPilihan == $key) ? 'selected' : '' }}>{{ $val }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label fw-bold small mb-1">Pilih Tahun</label>
-                        <select name="tahun" class="form-select form-select-sm">
-                            @for($t = date('Y'); $t >= 2024; $t--)
-                                <option value="{{ $t }}" {{ ($tahunPilihan == $t) ? 'selected' : '' }}>{{ $t }}</option>
-                            @endfor
-                        </select>
-                    </div>
-                    <div class="col-md-2 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold">🔍 Rekap Periode</button>
+                <form method="GET" action="{{ url('/riwayat') }}" id="filterForm">
+                    <div class="row g-2 align-items-center">
+                        
+                        <div class="col-12 col-md-3">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-white border-end-0 text-muted">🔍</span>
+                                <input type="text" id="searchInput" onkeyup="filterTable()" class="form-control border-start-0" placeholder="Cari kode, nama barang, teknisi...">
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-md-3">
+                            <select id="filterJenis" onchange="filterTable()" class="form-select form-select-sm fw-bold">
+                                <option value="">📦 Semua Jenis Transaksi</option>
+                                <option value="MASUK">📥 Barang Masuk</option>
+                                <option value="KELUAR">📤 Barang Keluar</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12 col-md-3">
+                            <div class="d-flex gap-1">
+                                <select name="bulan" class="form-select form-select-sm" onchange="document.getElementById('filterForm').submit()">
+                                    <option value="01" {{ request('bulan', date('m')) == '01' ? 'selected' : '' }}>Januari</option>
+                                    <option value="02" {{ request('bulan', date('m')) == '02' ? 'selected' : '' }}>Februari</option>
+                                    <option value="03" {{ request('bulan', date('m')) == '03' ? 'selected' : '' }}>Maret</option>
+                                    <option value="04" {{ request('bulan', date('m')) == '04' ? 'selected' : '' }}>April</option>
+                                    <option value="05" {{ request('bulan', date('m')) == '05' ? 'selected' : '' }}>Mei</option>
+                                    <option value="06" {{ request('bulan', date('m')) == '06' ? 'selected' : '' }}>Juni</option>
+                                    <option value="07" {{ request('bulan', date('m')) == '07' ? 'selected' : '' }}>Juli</option>
+                                    <option value="08" {{ request('bulan', date('m')) == '08' ? 'selected' : '' }}>Agustus</option>
+                                    <option value="09" {{ request('bulan', date('m')) == '09' ? 'selected' : '' }}>September</option>
+                                    <option value="10" {{ request('bulan', date('m')) == '10' ? 'selected' : '' }}>Oktober</option>
+                                    <option value="11" {{ request('bulan', date('m')) == '11' ? 'selected' : '' }}>November</option>
+                                    <option value="12" {{ request('bulan', date('m')) == '12' ? 'selected' : '' }}>Desember</option>
+                                </select>
+                                <select name="tahun" class="form-select form-select-sm" onchange="document.getElementById('filterForm').submit()">
+                                    <option value="2026" {{ request('tahun', date('Y')) == '2026' ? 'selected' : '' }}>2026</option>
+                                    <option value="2025" {{ request('tahun', date('Y')) == '2025' ? 'selected' : '' }}>2025</option>
+                                    <option value="2024" {{ request('tahun', date('Y')) == '2024' ? 'selected' : '' }}>2024</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-md-3 text-md-end">
+                            <div class="btn-group btn-group-sm w-100 w-md-auto">
+                                <button type="button" onclick="exportData('pdf')" class="btn btn-outline-secondary fw-bold">🖨️ PDF</button>
+                                <button type="button" onclick="exportData('excel')" class="btn btn-outline-success fw-bold">📊 Excel</button>
+                                <button type="button" onclick="exportData('word')" class="btn btn-outline-primary fw-bold">📝 Word</button>
+                            </div>
+                        </div>
+
                     </div>
                 </form>
-
-                <div class="row g-2 align-items-center">
-                    <div class="col-md-3">
-                        <input type="text" id="cariBarang" class="form-control form-control-sm" placeholder="🔍 Cari kode, nama, teknisi..." onkeyup="filterTabel()">
-                    </div>
-                    <div class="col-md-3">
-                        <select id="filterJenis" class="form-select form-select-sm" onchange="filterTabel()">
-                            <option value="">-- Semua Jenis Transaksi --</option>
-                            <option value="MASUK">📥 Barang Masuk</option>
-                            <option value="KELUAR">📤 Barang Keluar</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6 text-end d-flex gap-1 justify-content-end">
-                        <button onclick="window.print()" class="btn btn-outline-secondary btn-sm fw-bold">🖨️ Cetak</button>
-                        <a href="{{ url('/riwayat/export-pdf?bulan='.$bulanPilihan.'&tahun='.$tahunPilihan) }}" class="btn btn-outline-danger btn-sm fw-bold">📄 Export PDF</a>
-                        <a href="{{ url('/riwayat/export-word?bulan='.$bulanPilihan.'&tahun='.$tahunPilihan) }}" class="btn btn-outline-primary btn-sm fw-bold">📝 Export Word</a>
-                        <a href="{{ url('/riwayat/export-excel?bulan='.$bulanPilihan.'&tahun='.$tahunPilihan) }}" class="btn btn-outline-success btn-sm fw-bold">📊 Export Excel</a>
-                    </div>
-                </div>
             </div>
         </div>
 
-        <!-- Tabel Riwayat Utama -->
+        <!-- Tabel Riwayat Mutasi Transaksi Barang -->
         <div class="card shadow-sm border-0">
-            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <div class="card-header bg-white py-3 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
                 <div>
-                    <h5 class="fw-bold mb-0">📋 Riwayat & Mutasi Barang - {{ $namaBulanPilihan }} {{ $tahunPilihan }}</h5>
-                    <small class="text-muted">Catatan log barang masuk dan keluar tersimpan otomatis</small>
+                    <h5 class="fw-bold mb-0 text-dark">📜 Riwayat Mutasi Transaksi Barang</h5>
+                    <small class="text-muted">Catatan log barang masuk dan keluar secara tersimpan otomatis</small>
                 </div>
-                <span class="badge bg-primary fs-6 no-print">Total: {{ count($riwayats ?? []) }} Transaksi</span>
+                <span class="badge bg-primary px-3 py-2 fs-6 align-self-start align-self-md-auto">Total: <span id="totalCounter">{{ count($riwayats ?? []) }}</span> Transaksi</span>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0" id="tabelRiwayat">
+                    <table class="table table-hover align-middle mb-0 text-nowrap" id="riwayatTable">
                         <thead class="table-light">
                             <tr>
                                 <th>No</th>
@@ -140,50 +124,39 @@
                                 <th>Nama Barang</th>
                                 <th class="text-center">Jenis Transaksi</th>
                                 <th class="text-center">Jumlah (Qty)</th>
-                                <th>Harga Satuan</th>
-                                <th>Subtotal (Rp)</th>
+                                <th class="text-end">Harga Satuan</th>
+                                <th class="text-end">Subtotal (Rp)</th>
                                 <th>Penerima / Teknisi</th>
                                 <th>Keterangan</th>
-                                @if(session('user_role') === 'ADMIN')
-                                    <th class="text-center no-print">Aksi</th>
-                                @endif
+                                <th class="text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
                             @forelse($riwayats ?? [] as $index => $r)
-                            @php
-                                $jenis = $r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? $r->status ?? 'MASUK';
-                                $subtotal = ($r->jumlah ?? 0) * ($r->harga_satuan ?? 0);
-                                $tglFormatted = \Carbon\Carbon::parse($r->created_at)->translatedFormat('d M Y H:i');
-                            @endphp
-                            <tr>
+                            <tr class="data-row" data-jenis="{{ strtoupper($r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? 'MASUK') }}">
                                 <td>{{ $index + 1 }}</td>
-                                <td><small class="text-muted fw-bold">{{ $tglFormatted }}</small></td>
-                                <td><code>{{ $r->kode_barang }}</code></td>
-                                <td class="fw-bold">{{ $r->nama_barang }}</td>
+                                <td>{{ date('d/m/Y H:i', strtotime($r->created_at)) }}</td>
+                                <td><code class="text-danger">{{ $r->kode_barang }}</code></td>
+                                <td class="fw-bold text-dark">{{ $r->nama_barang }}</td>
                                 <td class="text-center">
-                                    @if(strtoupper($jenis) === 'MASUK')
-                                        <span class="badge bg-success">📥 MASUK</span>
+                                    @if(strtoupper($r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? 'MASUK') === 'MASUK')
+                                        <span class="badge bg-success px-2 py-1">MASUK</span>
                                     @else
-                                        <span class="badge bg-danger">📤 KELUAR</span>
+                                        <span class="badge bg-danger px-2 py-1">KELUAR</span>
                                     @endif
                                 </td>
                                 <td class="text-center fw-bold">{{ $r->jumlah }} {{ $r->satuan }}</td>
-                                <td>Rp {{ number_format($r->harga_satuan ?? 0, 0, ',', '.') }}</td>
-                                <td class="fw-bold text-primary">Rp {{ number_format($subtotal, 0, ',', '.') }}</td>
+                                <td class="text-end text-muted">Rp {{ number_format($r->harga_satuan ?? 0, 0, ',', '.') }}</td>
+                                <td class="text-end fw-bold text-primary">Rp {{ number_format(($r->jumlah ?? 0) * ($r->harga_satuan ?? 0), 0, ',', '.') }}</td>
                                 <td>{{ $r->penerima ?? '-' }}</td>
-                                <td><small class="text-muted">{{ $r->keterangan ?? '-' }}</small></td>
-                                @if(session('user_role') === 'ADMIN')
-                                <td class="text-center no-print">
-                                    <a href="{{ url('/transaksi/delete/' . $r->id) }}" class="btn btn-sm btn-outline-danger p-1 px-2" onclick="return confirm('Hapus transaksi ini?')" title="Hapus Transaksi">🗑️</a>
+                                <td>{{ $r->keterangan ?? '-' }}</td>
+                                <td class="text-center">
+                                    <a href="{{ url('/transaksi/delete/' . $r->id) }}" class="btn btn-sm btn-light text-muted border p-1 px-2" onclick="return confirm('Apakah Anda yakin ingin menghapus transaksi ini?')">🗑️</a>
                                 </td>
-                                @endif
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="11" class="text-center text-muted p-5">
-                                    📜 Tidak ada riwayat transaksi barang pada bulan {{ $namaBulanPilihan }} {{ $tahunPilihan }}.
-                                </td>
+                                <td colspan="11" class="text-center text-muted p-4">Belum ada data riwayat transaksi tersimpan.</td>
                             </tr>
                             @endforelse
                         </tbody>
@@ -191,40 +164,41 @@
                 </div>
             </div>
         </div>
+
     </div>
 
-    <!-- Script Filter Pencarian Realtime -->
     <script>
-        function filterTabel() {
-            let inputCari = document.getElementById("cariBarang").value.toUpperCase();
-            let inputJenis = document.getElementById("filterJenis").value.toUpperCase();
-            let tr = document.getElementById("tabelRiwayat").getElementsByTagName("tr");
+        function filterTable() {
+            const searchValue = document.getElementById('searchInput').value.toLowerCase();
+            const filterJenis = document.getElementById('filterJenis').value;
+            const rows = document.querySelectorAll('.data-row');
+            let visibleCount = 0;
 
-            for (let i = 1; i < tr.length; i++) {
-                let tdKode = tr[i].getElementsByTagName("td")[2];
-                let tdNama = tr[i].getElementsByTagName("td")[3];
-                let tdJenis = tr[i].getElementsByTagName("td")[4];
-                let tdPenerima = tr[i].getElementsByTagName("td")[8];
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                const jenis = row.getAttribute('data-jenis');
 
-                if (tdKode || tdNama) {
-                    let txtKode = tdKode.textContent || tdKode.innerText;
-                    let txtNama = tdNama.textContent || tdNama.innerText;
-                    let txtJenis = tdJenis.textContent || tdJenis.innerText;
-                    let txtPenerima = tdPenerima ? (tdPenerima.textContent || tdPenerima.innerText) : "";
+                const matchesSearch = text.includes(searchValue);
+                const matchesJenis = filterJenis === '' || jenis === filterJenis;
 
-                    let matchCari = (txtKode.toUpperCase().indexOf(inputCari) > -1) || 
-                                    (txtNama.toUpperCase().indexOf(inputCari) > -1) ||
-                                    (txtPenerima.toUpperCase().indexOf(inputCari) > -1);
-                    
-                    let matchJenis = (inputJenis === "") || (txtJenis.toUpperCase().indexOf(inputJenis) > -1);
-
-                    if (matchCari && matchJenis) {
-                        tr[i].style.display = "";
-                    } else {
-                        tr[i].style.display = "none";
-                    }
+                if (matchesSearch && matchesJenis) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
                 }
-            }
+            });
+
+            document.getElementById('totalCounter').innerText = visibleCount;
+        }
+
+        function exportData(format) {
+            const jenis = document.getElementById('filterJenis').value || 'MASUK';
+            const bulan = document.querySelector('select[name="bulan"]').value;
+            const tahun = document.querySelector('select[name="tahun"]').value;
+
+            const baseUrl = "{{ url('/riwayat/export-') }}";
+            window.location.href = baseUrl + format + '?bulan=' + bulan + '&tahun=' + tahun + '&jenis=' + jenis;
         }
     </script>
 

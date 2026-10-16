@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Input Transaksi Barang - SI-MONI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        html, body { max-width: 100%; overflow-x: hidden; }
+    </style>
 </head>
 <body class="bg-light">
 
@@ -14,18 +17,18 @@
             <a class="navbar-brand fw-bold" href="{{ url('/') }}">
                 🏢 SI-MONI <span class="fs-6 fw-normal">| PT Camperniq Solusi Intermedia</span>
             </a>
-            <a href="{{ url('/') }}" class="btn btn-outline-light btn-sm fw-bold">⬅️ Kembali ke Dashboard</a>
+            <a href="{{ url('/') }}" class="btn btn-outline-light btn-sm fw-bold ms-auto">⬅️ Kembali ke Dashboard</a>
         </div>
     </nav>
 
     <div class="container my-4">
         <div class="row justify-content-center">
-            <div class="col-md-8">
+            <div class="col-12 col-md-8">
                 <div class="card shadow-sm border-0">
                     <div class="card-header bg-primary text-white fw-bold py-3">
                         📑 Catat Transaksi Barang (Masuk / Keluar)
                     </div>
-                    <div class="card-body p-4">
+                    <div class="card-body p-3 p-md-4">
 
                         @if(session('error'))
                             <div class="alert alert-danger alert-dismissible fade show" role="alert">
@@ -43,49 +46,43 @@
                                 <input type="date" name="tanggal" class="form-control" value="{{ date('Y-m-d') }}" required>
                             </div>
 
-                            <!-- PILIH BARANG (HITUNG STOK AKHIR DINAMIS) -->
+                            <!-- PILIH BARANG -->
                             <div class="mb-3">
                                 <label class="form-label fw-bold">Pilih Barang</label>
                                 <select name="barang_id" class="form-select" required>
                                     <option value="" selected disabled>-- Pilih Barang --</option>
                                     @foreach($barangs as $b)
                                         @php
-                                            // Kalkulasi Stok Akhir Realtime
-                                            $stokAwal = $b->stok_awal ?? $b->stok ?? 0;
+                                            $stokBase = $b->stok_awal ?? $b->stok ?? $b->stok_akhir ?? 0;
                                             
+                                            $kolomJenis = \Illuminate\Support\Facades\Schema::hasColumn('transaksi_barang', 'jenis_transaksi') ? 'jenis_transaksi' : 
+                                                         (\Illuminate\Support\Facades\Schema::hasColumn('transaksi_barang', 'jenis') ? 'jenis' : 'tipe');
+
                                             $totalMasuk = \Illuminate\Support\Facades\DB::table('transaksi_barang')
                                                 ->where('barang_id', $b->id)
-                                                ->where(function($q) {
-                                                    $q->where('jenis_transaksi', 'MASUK')
-                                                      ->orWhere('jenis', 'MASUK')
-                                                      ->orWhere('tipe', 'MASUK')
-                                                      ->orWhere('status', 'MASUK');
-                                                })->sum('jumlah');
+                                                ->where($kolomJenis, 'MASUK')
+                                                ->sum('jumlah');
 
                                             $totalKeluar = \Illuminate\Support\Facades\DB::table('transaksi_barang')
                                                 ->where('barang_id', $b->id)
-                                                ->where(function($q) {
-                                                    $q->where('jenis_transaksi', 'KELUAR')
-                                                      ->orWhere('jenis', 'KELUAR')
-                                                      ->orWhere('tipe', 'KELUAR')
-                                                      ->orWhere('status', 'KELUAR');
-                                                })->sum('jumlah');
+                                                ->where($kolomJenis, 'KELUAR')
+                                                ->sum('jumlah');
 
-                                            $sisaStokReal = $stokAwal + $totalMasuk - $totalKeluar;
+                                            $sisaStokReal = $stokBase + $totalMasuk - $totalKeluar;
                                         @endphp
                                         <option value="{{ $b->id }}">
-                                            {{ $b->kode_barang }} - {{ $b->nama_barang }} (Sisa Stok: {{ $sisaStokReal }})
+                                            {{ $b->kode_barang }} - {{ $b->nama_barang }} (Sisa Stok: {{ $sisaStokReal }} {{ $b->satuan }})
                                         </option>
                                     @endforeach
                                 </select>
                             </div>
 
-                            <!-- JENIS TRANSAKSI -->
+                            <!-- JENIS TRANSAKSI (OTOMATIS SESUAI TOMBOL KLIK) -->
                             <div class="mb-3">
                                 <label class="form-label fw-bold">Jenis Transaksi</label>
                                 <select name="jenis_transaksi" class="form-select" required>
-                                    <option value="MASUK">🟢 Barang Masuk (Restock / Penambahan Stok)</option>
-                                    <option value="KELUAR">🔴 Barang Keluar (Pengambilan oleh Teknisi)</option>
+                                    <option value="MASUK" {{ request('jenis') == 'MASUK' ? 'selected' : '' }}>🟢 Barang Masuk (Restock / Penambahan Stok)</option>
+                                    <option value="KELUAR" {{ request('jenis') == 'KELUAR' ? 'selected' : '' }}>🔴 Barang Keluar (Pengambilan oleh Teknisi)</option>
                                 </select>
                             </div>
 

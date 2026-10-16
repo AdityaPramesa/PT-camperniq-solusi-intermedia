@@ -5,119 +5,79 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 
 class AuthController extends Controller
 {
     public function showLoginForm()
     {
-        if (Session::has('user_id')) {
+        if (Session::has('user_role')) {
             return redirect('/');
         }
-        return view('auth.login');
+        
+        if (view()->exists('auth.login')) {
+            return view('auth.login');
+        } elseif (view()->exists('login')) {
+            return view('login');
+        }
+
+        return redirect('/');
     }
 
     public function login(Request $request)
     {
-        $username = strtolower(trim($request->input('username')));
-        $password = trim($request->input('password'));
+        // 1. Ambil input username dan password persis (tanpa strtolower)
+        $inputUsername = trim($request->input('username'));
+        $inputPassword = $request->input('password');
 
-        // 1. Auto Bypass untuk Akun ADMIN Default
-        if ($username === 'admin' && $password === 'admin123') {
-            $user = DB::table('users')->where('username', 'admin')->first();
-            
-            if (!$user) {
-                $dataInsert = [
-                    'username' => 'admin',
-                    'password' => 'admin123',
-                ];
+        // Tentukan nama tabel users/user
+        $tabel = Schema::hasTable('users') ? 'users' : 'user';
 
-                if (Schema::hasColumn('users', 'nama_lengkap')) {
-                    $dataInsert['nama_lengkap'] = 'Admin PT Camperniq';
-                } elseif (Schema::hasColumn('users', 'nama')) {
-                    $dataInsert['nama'] = 'Admin PT Camperniq';
-                } elseif (Schema::hasColumn('users', 'name')) {
-                    $dataInsert['name'] = 'Admin PT Camperniq';
-                }
+        // Cari user berdasarkan username di database
+        $user = DB::table($tabel)->where('username', $inputUsername)->first();
 
-                if (Schema::hasColumn('users', 'role')) {
-                    $dataInsert['role'] = 'ADMIN';
-                }
-
-                $userId = DB::table('users')->insertGetId($dataInsert);
-            } else {
-                $userId = $user->id;
-                if (Schema::hasColumn('users', 'role')) {
-                    DB::table('users')->where('id', $userId)->update(['role' => 'ADMIN']);
-                }
+        if ($user) {
+            // 2. Validasi Username Harus Tepat Persis (Case-Sensitive Exact Match)
+            if (strcmp((string)$user->username, (string)$inputUsername) !== 0) {
+                return back()->with('error', 'Username atau Password salah!')->withInput();
             }
 
-            $namaTampil = $user->nama_lengkap ?? $user->nama ?? $user->name ?? 'Admin PT Camperniq';
+            $isValidPassword = false;
 
-            Session::put('user_id', $userId);
-            Session::put('user_nama', $namaTampil);
-            Session::put('user_role', 'ADMIN');
-
-            return redirect('/')->with('success', 'Selamat datang kembali, Administrator!');
-        }
-
-        // 2. Auto Bypass untuk Akun TEKNISI Default
-        if ($username === 'teknisi' && ($password === 'teknisi123' || $password === 'teknisi')) {
-            $user = DB::table('users')->where('username', 'teknisi')->first();
-            
-            if (!$user) {
-                $dataInsert = [
-                    'username' => 'teknisi',
-                    'password' => 'teknisi123',
-                ];
-
-                if (Schema::hasColumn('users', 'nama_lengkap')) {
-                    $dataInsert['nama_lengkap'] = 'Teknisi Lapangan';
-                } elseif (Schema::hasColumn('users', 'nama')) {
-                    $dataInsert['nama'] = 'Teknisi Lapangan';
-                } elseif (Schema::hasColumn('users', 'name')) {
-                    $dataInsert['name'] = 'Teknisi Lapangan';
-                }
-
-                if (Schema::hasColumn('users', 'role')) {
-                    $dataInsert['role'] = 'TEKNISI';
-                }
-
-                $userId = DB::table('users')->insertGetId($dataInsert);
-            } else {
-                $userId = $user->id;
+            // 3. Validasi Password (Hash / Case-Sensitive Plain-Text)
+            if (Hash::check($inputPassword, $user->password)) {
+                $isValidPassword = true;
+            } elseif (strcmp((string)$user->password, (string)$inputPassword) === 0) {
+                $isValidPassword = true;
+                
+                // Otomatis update password ke Hash Bcrypt resmi demi keamanan
+                DB::table($tabel)->where('id', $user->id)->update([
+                    'password' => Hash::make($inputPassword)
+                ]);
             }
 
-            $namaTampil = $user->nama_lengkap ?? $user->nama ?? $user->name ?? 'Teknisi Lapangan';
+            // Jika Username DAN Password 100% Cocok Persis
+            if ($isValidPassword) {
+                $namaUser = $user->nama_lengkap ?? $user->nama ?? $user->name ?? $user->username;
+                $roleUser = strtoupper($user->role ?? $user->hak_akses ?? $user->level ?? 'TEKNISI');
 
-            Session::put('user_id', $userId);
-            Session::put('user_nama', $namaTampil);
-            Session::put('user_role', 'TEKNISI');
+                Session::put('user_id', $user->id);
+                Session::put('user_nama', $namaUser);
+                Session::put('user_role', $roleUser);
 
-            return redirect('/')->with('success', 'Selamat datang, Teknisi Lapangan!');
+                return redirect('/')->with('success', 'Berhasil login sebagai ' . $roleUser . '!');
+            }
         }
 
-        // 3. Autentikasi User Lain dari Database
-        $user = DB::table('users')->where('username', $username)->first();
-
-        if ($user && ($user->password === $password || password_verify($password, $user->password))) {
-            $namaUser = $user->nama_lengkap ?? $user->nama ?? $user->name ?? $user->username;
-            $roleUser = strtoupper($user->role ?? 'TEKNISI');
-
-            Session::put('user_id', $user->id);
-            Session::put('user_nama', $namaUser);
-            Session::put('user_role', $roleUser);
-
-            return redirect('/')->with('success', 'Selamat datang kembali, ' . $namaUser . '!');
-        }
-
+        // Jika Username/Password tidak cocok persis
         return back()->with('error', 'Username atau Password salah!')->withInput();
     }
 
     public function logout()
     {
         Session::flush();
-        return redirect('/login')->with('success', 'Anda telah berhasil keluar dari sistem.');
+        return redirect('/login')->with('success', 'Berhasil keluar dari sistem.');
     }
 
     // --- FITUR KELOLA USER (KHUSUS ADMIN) ---
@@ -125,23 +85,24 @@ class AuthController extends Controller
     public function indexUser()
     {
         if (Session::get('user_role') !== 'ADMIN') {
-            return redirect('/')->with('error', 'Akses ditolak! Fitur ini khusus Admin.');
+            return redirect('/')->with('error', 'Akses ditolak!');
         }
 
-        // PAKSA UPDATE ROLE USER 'admin' MENJADI 'ADMIN' DI DATABASE
-        if (Schema::hasColumn('users', 'role')) {
-            DB::table('users')->where('username', 'admin')->update(['role' => 'ADMIN']);
-        }
+        $tabel = Schema::hasTable('users') ? 'users' : 'user';
+        $users = DB::table($tabel)->get();
 
-        $users = DB::table('users')->orderBy('id', 'ASC')->get();
-
-        // Standardisasi huruf kapital untuk role pada semua data user
         foreach ($users as $u) {
             if (isset($u->role)) {
                 $u->role = strtoupper($u->role);
             }
         }
-        
+
+        if (view()->exists('users')) {
+            return view('users', compact('users'));
+        } elseif (view()->exists('user.index')) {
+            return view('user.index', compact('users'));
+        }
+
         return view('users', compact('users'));
     }
 
@@ -152,28 +113,40 @@ class AuthController extends Controller
         }
 
         $request->validate([
-            'username' => 'required|unique:users,username',
+            'username' => 'required',
             'password' => 'required|min:4',
-            'role' => 'required',
+            'role'     => 'required',
         ]);
 
-        $dataInsert = [
-            'username' => strtolower(trim($request->username)),
-            'password' => trim($request->password),
-            'role' => strtoupper($request->role),
-        ];
+        $tabel = Schema::hasTable('users') ? 'users' : 'user';
 
-        if (Schema::hasColumn('users', 'nama_lengkap')) {
-            $dataInsert['nama_lengkap'] = trim($request->nama);
-        } elseif (Schema::hasColumn('users', 'nama')) {
-            $dataInsert['nama'] = trim($request->nama);
-        } elseif (Schema::hasColumn('users', 'name')) {
-            $dataInsert['name'] = trim($request->nama);
+        $namaInput = $request->input('nama_lengkap') ?? $request->input('nama') ?? $request->input('name') ?? 'Karyawan Baru';
+        $usernameInput = trim($request->input('username'));
+        $roleInput = strtoupper($request->input('role'));
+
+        $cek = DB::table($tabel)->where('username', $usernameInput)->first();
+        if ($cek) {
+            return redirect('/kelola-user')->with('error', 'Username "' . $usernameInput . '" sudah digunakan!');
         }
 
-        DB::table('users')->insert($dataInsert);
+        $dataInsert = [
+            'username' => $usernameInput,
+            'password' => Hash::make(trim($request->input('password'))),
+        ];
 
-        return redirect('/kelola-user')->with('success', 'Akun pengguna baru berhasil dibuat!');
+        if (Schema::hasColumn($tabel, 'nama_lengkap')) $dataInsert['nama_lengkap'] = $namaInput;
+        elseif (Schema::hasColumn($tabel, 'nama')) $dataInsert['nama'] = $namaInput;
+        elseif (Schema::hasColumn($tabel, 'name')) $dataInsert['name'] = $namaInput;
+
+        if (Schema::hasColumn($tabel, 'role')) $dataInsert['role'] = $roleInput;
+        elseif (Schema::hasColumn($tabel, 'hak_akses')) $dataInsert['hak_akses'] = $roleInput;
+
+        if (Schema::hasColumn($tabel, 'created_at')) $dataInsert['created_at'] = now();
+        if (Schema::hasColumn($tabel, 'updated_at')) $dataInsert['updated_at'] = now();
+
+        DB::table($tabel)->insert($dataInsert);
+
+        return redirect('/kelola-user')->with('success', 'Akun ' . $namaInput . ' berhasil ditambahkan!');
     }
 
     public function destroyUser($id)
@@ -183,10 +156,12 @@ class AuthController extends Controller
         }
 
         if ($id == Session::get('user_id')) {
-            return redirect('/kelola-user')->with('error', 'Anda tidak dapat menghapus akun Anda sendiri yang sedang digunakan!');
+            return redirect('/kelola-user')->with('error', 'Tidak dapat menghapus akun Anda sendiri yang sedang aktif!');
         }
 
-        DB::table('users')->where('id', $id)->delete();
+        $tabel = Schema::hasTable('users') ? 'users' : 'user';
+        DB::table($tabel)->where('id', $id)->delete();
+
         return redirect('/kelola-user')->with('success', 'Akun pengguna berhasil dihapus!');
     }
 }

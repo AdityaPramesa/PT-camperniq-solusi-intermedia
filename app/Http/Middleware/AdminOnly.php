@@ -7,20 +7,17 @@ use Illuminate\Http\Request;
 
 class AdminOnly
 {
-    /**
-     * Handle an incoming request.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \Closure  $next
-     * @return mixed
-     */
     public function handle(Request $request, Closure $next)
     {
-        // Cek apakah user sudah login dan rolenya adalah ADMIN
-        if (strtoupper(session('user_role')) !== 'ADMIN') {
-            return redirect('/')->with('error', 'Akses ditolak! Fitur ini khusus untuk ADMIN.');
+        // Ambil role dari session secara fleksibel
+        $userRole = strtoupper(session('user_role') ?? session('role') ?? session('hak_akses') ?? session('level') ?? '');
+
+        // Jika role adalah ADMIN, izinkan lewat
+        if ($userRole === 'ADMIN') {
+            return $next($request);
         }
 
-        return $next($request);
+        // Jika bukan ADMIN (Teknisi/Guest), tendang ke halaman utama dengan pesan error
+        return redirect('/')->with('error', 'Akses ditolak! Fitur ini khusus untuk Admin.');
     }
 }

@@ -17,7 +17,6 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class BarangController extends Controller
 {
-    // Helper otomatis untuk mendeteksi nama kolom jenis transaksi
     private function getKolomJenisTransaksi()
     {
         if (Schema::hasColumn('transaksi_barang', 'jenis_transaksi')) {
@@ -32,11 +31,40 @@ class BarangController extends Controller
         return 'jenis_transaksi';
     }
 
+    /**
+     * Helper untuk menentukan batas stok minim/kritis berdasarkan kustom DB atau Satuan Barang
+     */
+    private function getBatasStokMinim($barang)
+    {
+        // 1. Jika ada kolom stok_minimal / min_stok di database, gunakan nilainya
+        if (isset($barang->stok_minimal) && is_numeric($barang->stok_minimal)) {
+            return (int) $barang->stok_minimal;
+        }
+        if (isset($barang->min_stok) && is_numeric($barang->min_stok)) {
+            return (int) $barang->min_stok;
+        }
+
+        // 2. Jika tidak ada, gunakan logika otomatis berdasarkan jenis Satuan
+        $satuanClean = strtoupper(trim($barang->satuan ?? ''));
+        
+        if (str_contains($satuanClean, 'METER') || $satuanClean === 'M') {
+            return 200; // Perkabelan: Kritis jika <= 200 Meter
+        }
+
+        return 5; // Barang PCS / Unit / ODP / Dll: Kritis jika <= 5 PCS
+    }
+
     // ----------------------------------------------------
     // DASHBOARD UTAMA
     // ----------------------------------------------------
     public function index()
     {
+        // 🔒 CEK APAKAH USER SUDAH LOGIN?
+        // Jika belum ada session login, paksa arahkan ke halaman LOGIN dulu
+        if (!session()->has('user_id') && !session()->has('user_role') && !session()->has('user_name')) {
+            return redirect('/login');
+        }
+
         $barangs = DB::table('master_barang')->get();
 
         $totalJenisBarang = count($barangs);
@@ -46,6 +74,8 @@ class BarangController extends Controller
 
         $totalNilaiAsetGudang = 0;
         $totalPengeluaranBelanjaBulanIni = 0;
+        $totalPemasukanBarangKeluarBulanIni = 0;
+
         $bulanIni = date('m');
         $tahunIni = date('Y');
 
@@ -70,13 +100,18 @@ class BarangController extends Controller
             $b->stok_akhir = $stokAwal + $masuk - $keluar;
             $b->harga_satuan = $hargaSatuan;
 
+            // Hitung Batas Kritis Spesifik
+            $b->batas_kritis = $this->getBatasStokMinim($b);
+
             $totalNilaiAsetGudang += ($b->stok_akhir * $hargaSatuan);
 
-            if ($b->stok_akhir <= 10) {
+            // Cek apakah sisa stok <= batas kritis item ini
+            if ($b->stok_akhir <= $b->batas_kritis) {
                 $totalStokKosong++;
             }
         }
 
+        // Hitung Belanja (Barang Masuk) Bulan Ini
         $transaksiMasukBulanIni = DB::table('transaksi_barang')
             ->join('master_barang', 'transaksi_barang.barang_id', '=', 'master_barang.id')
             ->where('transaksi_barang.' . $kolomJenis, 'MASUK')
@@ -89,7 +124,23 @@ class BarangController extends Controller
             $totalPengeluaranBelanjaBulanIni += ($t->jumlah * ($t->harga_satuan ?? 0));
         }
 
-        $barangStokMinim = collect($barangs)->where('stok_akhir', '<=', 10)->values();
+        // Hitung Pemasukan (Barang Keluar) Bulan Ini
+        $transaksiKeluarBulanIni = DB::table('transaksi_barang')
+            ->join('master_barang', 'transaksi_barang.barang_id', '=', 'master_barang.id')
+            ->where('transaksi_barang.' . $kolomJenis, 'KELUAR')
+            ->whereMonth('transaksi_barang.created_at', $bulanIni)
+            ->whereYear('transaksi_barang.created_at', $tahunIni)
+            ->select('transaksi_barang.jumlah', 'master_barang.harga_satuan')
+            ->get();
+
+        foreach ($transaksiKeluarBulanIni as $tk) {
+            $totalPemasukanBarangKeluarBulanIni += ($tk->jumlah * ($tk->harga_satuan ?? 0));
+        }
+
+        // Filter Barang yang Stoknya Kritis/Minim berdasarkan batas masing-masing
+        $barangStokMinim = collect($barangs)->filter(function ($b) {
+            return $b->stok_akhir <= $b->batas_kritis;
+        })->values();
 
         $grafikMasuk = [];
         $grafikKeluar = [];
@@ -107,17 +158,18 @@ class BarangController extends Controller
                 ->sum('jumlah');
         }
 
-        return view('barang.index', compact(
-            'barangs',
-            'totalJenisBarang',
-            'totalBarangMasuk',
-            'totalBarangKeluar',
-            'totalStokKosong',
-            'barangStokMinim',
-            'grafikMasuk',
-            'grafikKeluar',
-            'totalNilaiAsetGudang',
-            'totalPengeluaranBelanjaBulanIni'
+        if (view()->exists('barang.index')) {
+            return view('barang.index', compact(
+                'barangs', 'totalJenisBarang', 'totalBarangMasuk', 'totalBarangKeluar',
+                'totalStokKosong', 'barangStokMinim', 'grafikMasuk', 'grafikKeluar',
+                'totalNilaiAsetGudang', 'totalPengeluaranBelanjaBulanIni', 'totalPemasukanBarangKeluarBulanIni'
+            ));
+        }
+
+        return view('index', compact(
+            'barangs', 'totalJenisBarang', 'totalBarangMasuk', 'totalBarangKeluar',
+            'totalStokKosong', 'barangStokMinim', 'grafikMasuk', 'grafikKeluar',
+            'totalNilaiAsetGudang', 'totalPengeluaranBelanjaBulanIni', 'totalPemasukanBarangKeluarBulanIni'
         ));
     }
 
@@ -132,24 +184,34 @@ class BarangController extends Controller
     public function storeMasterBarang(Request $request)
     {
         $request->validate([
-            'kode_barang'  => 'required',
-            'nama_barang'  => 'required',
-            'satuan'       => 'required',
+            'kode_barang'  => 'required|max:50',
+            'nama_barang'  => 'required|max:255',
+            'satuan'       => 'required|max:20',
             'stok_awal'    => 'required|numeric',
             'harga_satuan' => 'required|numeric',
         ]);
 
+        $satuanClean = substr($request->satuan, 0, 20);
+        $kodeClean   = substr($request->kode_barang, 0, 50);
+
         $data = [
-            'kode_barang'  => $request->kode_barang,
+            'kode_barang'  => $kodeClean,
             'nama_barang'  => $request->nama_barang,
-            'satuan'       => $request->satuan,
+            'satuan'       => $satuanClean,
             'harga_satuan' => $request->harga_satuan,
         ];
 
-        if (Schema::hasColumn('master_barang', 'stok_awal')) {
+        $columns = Schema::getColumnListing('master_barang');
+
+        if (in_array('stok_awal', $columns)) {
             $data['stok_awal'] = $request->stok_awal;
-        } else {
+        } elseif (in_array('stok', $columns)) {
             $data['stok'] = $request->stok_awal;
+        }
+
+        // Jika ada input kustom stok minimal dari form
+        if ($request->has('stok_minimal') && in_array('stok_minimal', $columns)) {
+            $data['stok_minimal'] = $request->stok_minimal;
         }
 
         DB::table('master_barang')->insert($data);
@@ -166,24 +228,33 @@ class BarangController extends Controller
     public function updateMasterBarang(Request $request, $id)
     {
         $request->validate([
-            'kode_barang'  => 'required',
-            'nama_barang'  => 'required',
-            'satuan'       => 'required',
+            'kode_barang'  => 'required|max:50',
+            'nama_barang'  => 'required|max:255',
+            'satuan'       => 'required|max:20',
             'stok_awal'    => 'required|numeric',
             'harga_satuan' => 'required|numeric',
         ]);
 
+        $satuanClean = substr($request->satuan, 0, 20);
+        $kodeClean   = substr($request->kode_barang, 0, 50);
+
         $data = [
-            'kode_barang'  => $request->kode_barang,
+            'kode_barang'  => $kodeClean,
             'nama_barang'  => $request->nama_barang,
-            'satuan'       => $request->satuan,
+            'satuan'       => $satuanClean,
             'harga_satuan' => $request->harga_satuan,
         ];
 
-        if (Schema::hasColumn('master_barang', 'stok_awal')) {
+        $columns = Schema::getColumnListing('master_barang');
+
+        if (in_array('stok_awal', $columns)) {
             $data['stok_awal'] = $request->stok_awal;
-        } elseif (Schema::hasColumn('master_barang', 'stok')) {
+        } elseif (in_array('stok', $columns)) {
             $data['stok'] = $request->stok_awal;
+        }
+
+        if ($request->has('stok_minimal') && in_array('stok_minimal', $columns)) {
+            $data['stok_minimal'] = $request->stok_minimal;
         }
 
         DB::table('master_barang')->where('id', $id)->update($data);
@@ -205,7 +276,23 @@ class BarangController extends Controller
     public function createTransaksi()
     {
         $barangs = DB::table('master_barang')->get();
-        
+        $kolomJenis = $this->getKolomJenisTransaksi();
+
+        foreach ($barangs as $b) {
+            $masuk = DB::table('transaksi_barang')
+                ->where('barang_id', $b->id)
+                ->where($kolomJenis, 'MASUK')
+                ->sum('jumlah');
+
+            $keluar = DB::table('transaksi_barang')
+                ->where('barang_id', $b->id)
+                ->where($kolomJenis, 'KELUAR')
+                ->sum('jumlah');
+
+            $stokAwal = $b->stok_awal ?? $b->stok ?? 0;
+            $b->stok_akhir = $stokAwal + $masuk - $keluar;
+        }
+
         if (view()->exists('create_transaksi')) {
             return view('create_transaksi', compact('barangs'));
         }
@@ -213,7 +300,6 @@ class BarangController extends Controller
         return view('barang.create_transaksi', compact('barangs'));
     }
 
-    // PERBAIKAN DENGAN PENANGANAN LENGKAP UNTUK TANGGAL_TRANSAKSI, USER_ID, DLL
     public function storeTransaksi(Request $request)
     {
         $request->validate([
@@ -231,12 +317,10 @@ class BarangController extends Controller
             'jumlah'    => $request->jumlah,
         ];
 
-        // OTOMATISASI KOLOM TANGGAL_TRANSAKSI
         if (Schema::hasColumn('transaksi_barang', 'tanggal_transaksi')) {
             $dataInsert['tanggal_transaksi'] = $waktuInput;
         }
 
-        // OTOMATISASI USER_ID
         if (Schema::hasColumn('transaksi_barang', 'user_id')) {
             $userNama = session('user_name') ?? 'Admin';
             $tabelUser = Schema::hasTable('users') ? 'users' : 'user';
@@ -313,26 +397,27 @@ class BarangController extends Controller
             }
         }
 
-        return view('barang.riwayat', compact(
-            'riwayats',
-            'bulanPilihan',
-            'tahunPilihan',
-            'namaBulanPilihan',
-            'totalPengeluaranBulanIni',
-            'totalQtyMasukBulanIni',
-            'totalQtyKeluarBulanIni'
+        if (view()->exists('barang.riwayat')) {
+            return view('barang.riwayat', compact(
+                'riwayats', 'bulanPilihan', 'tahunPilihan', 'namaBulanPilihan',
+                'totalPengeluaranBulanIni', 'totalQtyMasukBulanIni', 'totalQtyKeluarBulanIni'
+            ));
+        }
+
+        return view('riwayat', compact(
+            'riwayats', 'bulanPilihan', 'tahunPilihan', 'namaBulanPilihan',
+            'totalPengeluaranBulanIni', 'totalQtyMasukBulanIni', 'totalQtyKeluarBulanIni'
         ));
     }
 
     // ----------------------------------------------------
-    // FITUR EKSPOR REKAPAN SERVER-SIDE MURNI
+    // FITUR EKSPOR SERVER-SIDE
     // ----------------------------------------------------
-
-    // 1. Export PDF Rekapan Bulanan Formal (DomPDF)
     public function exportPdf(Request $request)
     {
         $bulanPilihan = $request->get('bulan', date('m'));
         $tahunPilihan = $request->get('tahun', date('Y'));
+        $jenisFilter  = strtoupper($request->get('jenis', 'MASUK'));
 
         $namaBulans = [
             '01' => 'Januari', '02' => 'Februari', '03' => 'Maret', '04' => 'April',
@@ -341,27 +426,34 @@ class BarangController extends Controller
         ];
         $namaBulanPilihan = $namaBulans[str_pad($bulanPilihan, 2, '0', STR_PAD_LEFT)] ?? 'September';
 
-        $riwayats = DB::table('transaksi_barang')
+        $kolomJenis = $this->getKolomJenisTransaksi();
+
+        $query = DB::table('transaksi_barang')
             ->join('master_barang', 'transaksi_barang.barang_id', '=', 'master_barang.id')
             ->whereMonth('transaksi_barang.created_at', $bulanPilihan)
-            ->whereYear('transaksi_barang.created_at', $tahunPilihan)
-            ->select('transaksi_barang.*', 'master_barang.kode_barang', 'master_barang.nama_barang', 'master_barang.satuan', 'master_barang.harga_satuan')
+            ->whereYear('transaksi_barang.created_at', $tahunPilihan);
+
+        if (in_array($jenisFilter, ['MASUK', 'KELUAR'])) {
+            $query->where('transaksi_barang.' . $kolomJenis, $jenisFilter);
+        }
+
+        $riwayats = $query->select('transaksi_barang.*', 'master_barang.kode_barang', 'master_barang.nama_barang', 'master_barang.satuan', 'master_barang.harga_satuan')
             ->orderBy('transaksi_barang.id', 'DESC')
             ->get();
 
-        $totalPengeluaran = 0;
+        $totalNilai = 0;
         foreach ($riwayats as $r) {
-            $jenis = $r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? $r->status ?? 'MASUK';
-            if (strtoupper($jenis) === 'MASUK') {
-                $totalPengeluaran += ($r->jumlah * ($r->harga_satuan ?? 0));
-            }
+            $totalNilai += ($r->jumlah * ($r->harga_satuan ?? 0));
         }
+
+        $judulLaporan = ($jenisFilter === 'MASUK') ? 'LAPORAN REKAPITULASI BARANG MASUK' : 'LAPORAN REKAPITULASI BARANG KELUAR';
+        $labelTotal   = ($jenisFilter === 'MASUK') ? 'TOTAL BELANJA BARANG MASUK:' : 'TOTAL EVALUASI NILAI BARANG KELUAR:';
 
         $html = '
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Laporan Rekapan Bulanan SI-MONI</title>
+            <title>' . $judulLaporan . '</title>
             <style>
                 body { font-family: sans-serif; font-size: 10px; margin: 0; padding: 0; }
                 .header { text-align: center; margin-bottom: 15px; }
@@ -379,13 +471,13 @@ class BarangController extends Controller
         <body>
             <div class="header">
                 <h2>PT CAMPERNIQ SOLUSI INTERMEDIA</h2>
-                <h4>LAPORAN REKAPITULASI TRANSAKSI BARANG (SI-MONI)</h4>
+                <h4>' . $judulLaporan . '</h4>
                 <p>Periode Rekapan: ' . $namaBulanPilihan . ' ' . $tahunPilihan . '</p>
             </div>
 
             <div class="rekap-box">
-                <b>TOTAL PENGELUARAN BELANJA BARANG (MASUK):</b> 
-                <span style="color: #1F4E78; font-size: 13px; font-weight: bold;">Rp ' . number_format($totalPengeluaran, 0, ',', '.') . '</span>
+                <b>' . $labelTotal . '</b> 
+                <span style="color: #1F4E78; font-size: 13px; font-weight: bold;">Rp ' . number_format($totalNilai, 0, ',', '.') . '</span>
             </div>
 
             <table>
@@ -393,32 +485,32 @@ class BarangController extends Controller
                     <tr>
                         <th width="4%">No</th>
                         <th width="12%">Tanggal</th>
-                        <th width="11%">Kode</th>
-                        <th width="21%">Nama Barang</th>
-                        <th width="8%">Jenis</th>
-                        <th width="8%">Jumlah</th>
-                        <th width="11%">Harga Satuan</th>
-                        <th width="11%">Subtotal</th>
-                        <th width="14%">Teknisi</th>
+                        <th width="12%">Kode</th>
+                        <th width="24%">Nama Barang</th>
+                        <th width="10%">Jumlah</th>
+                        <th width="12%">Harga Satuan</th>
+                        <th width="12%">Subtotal</th>
+                        <th width="14%">Penerima / Teknisi</th>
                     </tr>
                 </thead>
                 <tbody>';
 
         foreach ($riwayats as $index => $r) {
-            $jenis = $r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? $r->status ?? 'MASUK';
             $subtotal = ($r->jumlah ?? 0) * ($r->harga_satuan ?? 0);
-
             $html .= '<tr>
                 <td class="text-center">' . ($index + 1) . '</td>
                 <td class="text-center">' . date('d/m/Y H:i', strtotime($r->created_at)) . '</td>
                 <td><code>' . htmlspecialchars($r->kode_barang) . '</code></td>
                 <td><b>' . htmlspecialchars($r->nama_barang) . '</b></td>
-                <td class="text-center">' . htmlspecialchars($jenis) . '</td>
                 <td class="text-center">' . $r->jumlah . ' ' . htmlspecialchars($r->satuan) . '</td>
                 <td class="text-right">Rp ' . number_format($r->harga_satuan ?? 0, 0, ',', '.') . '</td>
                 <td class="text-right"><b>Rp ' . number_format($subtotal, 0, ',', '.') . '</b></td>
                 <td>' . htmlspecialchars($r->penerima ?? '-') . '</td>
             </tr>';
+        }
+
+        if (count($riwayats) === 0) {
+            $html .= '<tr><td colspan="8" class="text-center">Tidak ada data transaksi ' . strtolower($jenisFilter) . '.</td></tr>';
         }
 
         $html .= '
@@ -428,14 +520,14 @@ class BarangController extends Controller
         </html>';
 
         $pdf = Pdf::loadHTML($html)->setPaper('a4', 'landscape');
-        return $pdf->download('Rekapan_SIMONI_' . $namaBulanPilihan . '_' . $tahunPilihan . '.pdf');
+        return $pdf->download('Laporan_' . $jenisFilter . '_Camperniq_' . $namaBulanPilihan . '_' . $tahunPilihan . '.pdf');
     }
 
-    // 2. Export Excel Rekapan Bulanan Formal (.xlsx)
     public function exportExcel(Request $request)
     {
         $bulanPilihan = $request->get('bulan', date('m'));
         $tahunPilihan = $request->get('tahun', date('Y'));
+        $jenisFilter  = strtoupper($request->get('jenis', 'MASUK'));
         
         $namaBulans = [
             '01' => 'Januari', '02' => 'Februari', '03' => 'Maret', '04' => 'April',
@@ -444,72 +536,76 @@ class BarangController extends Controller
         ];
         $namaBulanPilihan = $namaBulans[str_pad($bulanPilihan, 2, '0', STR_PAD_LEFT)] ?? 'September';
 
-        $riwayats = DB::table('transaksi_barang')
+        $kolomJenis = $this->getKolomJenisTransaksi();
+
+        $query = DB::table('transaksi_barang')
             ->join('master_barang', 'transaksi_barang.barang_id', '=', 'master_barang.id')
             ->whereMonth('transaksi_barang.created_at', $bulanPilihan)
-            ->whereYear('transaksi_barang.created_at', $tahunPilihan)
-            ->select('transaksi_barang.*', 'master_barang.kode_barang', 'master_barang.nama_barang', 'master_barang.satuan', 'master_barang.harga_satuan')
+            ->whereYear('transaksi_barang.created_at', $tahunPilihan);
+
+        if (in_array($jenisFilter, ['MASUK', 'KELUAR'])) {
+            $query->where('transaksi_barang.' . $kolomJenis, $jenisFilter);
+        }
+
+        $riwayats = $query->select('transaksi_barang.*', 'master_barang.kode_barang', 'master_barang.nama_barang', 'master_barang.satuan', 'master_barang.harga_satuan')
             ->orderBy('transaksi_barang.id', 'DESC')
             ->get();
 
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
 
+        $judulSheet = ($jenisFilter === 'MASUK') ? 'REKAPITULASI TRANSAKSI BARANG MASUK' : 'REKAPITULASI TRANSAKSI BARANG KELUAR';
+
         $sheet->setCellValue('A1', 'PT CAMPERNIQ SOLUSI INTERMEDIA');
-        $sheet->setCellValue('A2', 'REKAPITULASI TRANSAKSI BARANG - PERIODE ' . strtoupper($namaBulanPilihan) . ' ' . $tahunPilihan);
+        $sheet->setCellValue('A2', $judulSheet . ' - PERIODE ' . strtoupper($namaBulanPilihan) . ' ' . $tahunPilihan);
         
-        $sheet->mergeCells('A1:J1');
-        $sheet->mergeCells('A2:J2');
+        $sheet->mergeCells('A1:I1');
+        $sheet->mergeCells('A2:I2');
         $sheet->getStyle('A1:A2')->getFont()->setBold(true)->setSize(14);
         $sheet->getStyle('A1:A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $headers = ['No', 'Tanggal', 'Kode Barang', 'Nama Barang', 'Jenis Transaksi', 'Jumlah (Qty)', 'Harga Satuan (Rp)', 'Subtotal (Rp)', 'Penerima / Teknisi', 'Keterangan'];
+        $headers = ['No', 'Tanggal', 'Kode Barang', 'Nama Barang', 'Jumlah (Qty)', 'Harga Satuan (Rp)', 'Subtotal (Rp)', 'Penerima / Teknisi', 'Keterangan'];
         $col = 'A';
         foreach ($headers as $h) {
             $sheet->setCellValue($col . '4', $h);
             $col++;
         }
 
-        $sheet->getStyle('A4:J4')->getFont()->setBold(true)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE));
-        $sheet->getStyle('A4:J4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('1F4E78');
+        $sheet->getStyle('A4:I4')->getFont()->setBold(true)->setColor(new \PhpOffice\PhpSpreadsheet\Style\Color(\PhpOffice\PhpSpreadsheet\Style\Color::COLOR_WHITE));
+        $sheet->getStyle('A4:I4')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB($jenisFilter === 'MASUK' ? '198754' : 'DC3545');
 
         $row = 5;
-        $totalPengeluaran = 0;
+        $totalNilai = 0;
         foreach ($riwayats as $index => $r) {
-            $jenis = $r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? $r->status ?? 'MASUK';
             $subtotal = ($r->jumlah ?? 0) * ($r->harga_satuan ?? 0);
-
-            if (strtoupper($jenis) === 'MASUK') {
-                $totalPengeluaran += $subtotal;
-            }
+            $totalNilai += $subtotal;
 
             $sheet->setCellValue('A' . $row, $index + 1);
             $sheet->setCellValue('B' . $row, date('d M Y H:i', strtotime($r->created_at)));
             $sheet->setCellValue('C' . $row, $r->kode_barang);
             $sheet->setCellValue('D' . $row, $r->nama_barang);
-            $sheet->setCellValue('E' . $row, $jenis);
-            $sheet->setCellValue('F' . $row, $r->jumlah . ' ' . $r->satuan);
-            $sheet->setCellValue('G' . $row, $r->harga_satuan ?? 0);
-            $sheet->setCellValue('H' . $row, $subtotal);
-            $sheet->setCellValue('I' . $row, $r->penerima ?? '-');
-            $sheet->setCellValue('J' . $row, $r->keterangan ?? '-');
+            $sheet->setCellValue('E' . $row, $r->jumlah . ' ' . $r->satuan);
+            $sheet->setCellValue('F' . $row, $r->harga_satuan ?? 0);
+            $sheet->setCellValue('G' . $row, $subtotal);
+            $sheet->setCellValue('H' . $row, $r->penerima ?? '-');
+            $sheet->setCellValue('I' . $row, $r->keterangan ?? '-');
 
-            $sheet->getStyle('G' . $row . ':H' . $row)->getNumberFormat()->setFormatCode('#,##0');
+            $sheet->getStyle('F' . $row . ':G' . $row)->getNumberFormat()->setFormatCode('#,##0');
             $row++;
         }
 
-        $sheet->setCellValue('A' . $row, 'TOTAL PENGELUARAN BELANJA (BARANG MASUK):');
-        $sheet->mergeCells('A' . $row . ':G' . $row);
-        $sheet->setCellValue('H' . $row, $totalPengeluaran);
-        $sheet->getStyle('A' . $row . ':H' . $row)->getFont()->setBold(true);
-        $sheet->getStyle('H' . $row)->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->setCellValue('A' . $row, 'TOTAL REKAPITULASI:');
+        $sheet->mergeCells('A' . $row . ':F' . $row);
+        $sheet->setCellValue('G' . $row, $totalNilai);
+        $sheet->getStyle('A' . $row . ':G' . $row)->getFont()->setBold(true);
+        $sheet->getStyle('G' . $row)->getNumberFormat()->setFormatCode('#,##0');
 
-        foreach (range('A', 'J') as $col) {
+        foreach (range('A', 'I') as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
         }
 
         $writer = new Xlsx($spreadsheet);
-        $fileName = 'Rekapan_SIMONI_' . $namaBulanPilihan . '_' . $tahunPilihan . '.xlsx';
+        $fileName = 'Laporan_' . $jenisFilter . '_Camperniq_' . $namaBulanPilihan . '_' . $tahunPilihan . '.xlsx';
         
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment;filename="' . $fileName . '"');
@@ -519,11 +615,11 @@ class BarangController extends Controller
         exit;
     }
 
-    // 3. Export Word Rekapan Bulanan Formal Murni (.docx)
     public function exportWord(Request $request)
     {
         $bulanPilihan = $request->get('bulan', date('m'));
         $tahunPilihan = $request->get('tahun', date('Y'));
+        $jenisFilter  = strtoupper($request->get('jenis', 'MASUK'));
 
         $namaBulans = [
             '01' => 'Januari', '02' => 'Februari', '03' => 'Maret', '04' => 'April',
@@ -532,21 +628,27 @@ class BarangController extends Controller
         ];
         $namaBulanPilihan = $namaBulans[str_pad($bulanPilihan, 2, '0', STR_PAD_LEFT)] ?? 'September';
 
-        $riwayats = DB::table('transaksi_barang')
+        $kolomJenis = $this->getKolomJenisTransaksi();
+
+        $query = DB::table('transaksi_barang')
             ->join('master_barang', 'transaksi_barang.barang_id', '=', 'master_barang.id')
             ->whereMonth('transaksi_barang.created_at', $bulanPilihan)
-            ->whereYear('transaksi_barang.created_at', $tahunPilihan)
-            ->select('transaksi_barang.*', 'master_barang.kode_barang', 'master_barang.nama_barang', 'master_barang.satuan', 'master_barang.harga_satuan')
+            ->whereYear('transaksi_barang.created_at', $tahunPilihan);
+
+        if (in_array($jenisFilter, ['MASUK', 'KELUAR'])) {
+            $query->where('transaksi_barang.' . $kolomJenis, $jenisFilter);
+        }
+
+        $riwayats = $query->select('transaksi_barang.*', 'master_barang.kode_barang', 'master_barang.nama_barang', 'master_barang.satuan', 'master_barang.harga_satuan')
             ->orderBy('transaksi_barang.id', 'DESC')
             ->get();
 
-        $totalPengeluaran = 0;
+        $totalNilai = 0;
         foreach ($riwayats as $r) {
-            $jenis = $r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? $r->status ?? 'MASUK';
-            if (strtoupper($jenis) === 'MASUK') {
-                $totalPengeluaran += ($r->jumlah * ($r->harga_satuan ?? 0));
-            }
+            $totalNilai += ($r->jumlah * ($r->harga_satuan ?? 0));
         }
+
+        $judulLaporan = ($jenisFilter === 'MASUK') ? 'LAPORAN REKAPITULASI BARANG MASUK' : 'LAPORAN REKAPITULASI BARANG KELUAR';
 
         $phpWord = new PhpWord();
         $section = $phpWord->addSection([
@@ -557,13 +659,11 @@ class BarangController extends Controller
             'marginBottom' => 720
         ]);
 
-        // KOP HEADER
         $section->addText('PT CAMPERNIQ SOLUSI INTERMEDIA', ['bold' => true, 'size' => 14, 'name' => 'Arial', 'color' => '1F4E78'], ['alignment' => Jc::CENTER]);
-        $section->addText('LAPORAN REKAPITULASI TRANSAKSI BARANG (SI-MONI)', ['bold' => true, 'size' => 11, 'name' => 'Arial', 'color' => '333333'], ['alignment' => Jc::CENTER]);
+        $section->addText($judulLaporan, ['bold' => true, 'size' => 11, 'name' => 'Arial', 'color' => '333333'], ['alignment' => Jc::CENTER]);
         $section->addText('Periode Rekapan: ' . $namaBulanPilihan . ' ' . $tahunPilihan, ['italic' => true, 'size' => 9, 'name' => 'Arial', 'color' => '666666'], ['alignment' => Jc::CENTER]);
         $section->addTextBreak(1);
 
-        // BOX TOTAL PENGELUARAN
         $rekapTable = $section->addTable([
             'alignment'   => Jc::CENTER,
             'cellMargin'  => 120,
@@ -573,19 +673,18 @@ class BarangController extends Controller
         $rekapCell = $rekapTable->addCell(15200, [
             'bgColor'           => 'EBF1F5',
             'borderLeftSize'    => 36,
-            'borderLeftColor'   => '1F4E78',
+            'borderLeftColor'   => ($jenisFilter === 'MASUK' ? '198754' : 'DC3545'),
             'borderTopSize'     => 0,
             'borderRightSize'   => 0,
             'borderBottomSize'  => 0,
         ]);
         
         $textRun = $rekapCell->addTextRun();
-        $textRun->addText('TOTAL PENGELUARAN BELANJA BARANG (MASUK): ', ['bold' => true, 'size' => 10, 'name' => 'Arial', 'color' => '333333']);
-        $textRun->addText('Rp ' . number_format($totalPengeluaran, 0, ',', '.'), ['bold' => true, 'size' => 12, 'name' => 'Arial', 'color' => '1F4E78']);
+        $textRun->addText('TOTAL NILAI REKAPITULASI TRANSAKSI (' . $jenisFilter . '): ', ['bold' => true, 'size' => 10, 'name' => 'Arial', 'color' => '333333']);
+        $textRun->addText('Rp ' . number_format($totalNilai, 0, ',', '.'), ['bold' => true, 'size' => 12, 'name' => 'Arial', 'color' => ($jenisFilter === 'MASUK' ? '198754' : 'DC3545')]);
 
         $section->addTextBreak(1);
 
-        // TABEL UTAMA
         $table = $section->addTable([
             'borderSize'  => 4,
             'borderColor' => '777777',
@@ -598,36 +697,35 @@ class BarangController extends Controller
             ['No', 600, Jc::CENTER],
             ['Tanggal', 1800, Jc::CENTER],
             ['Kode', 1600, Jc::CENTER],
-            ['Nama Barang', 3400, Jc::LEFT],
-            ['Jenis', 1200, Jc::CENTER],
+            ['Nama Barang', 3600, Jc::LEFT],
             ['Jumlah', 1400, Jc::CENTER],
-            ['Harga Satuan', 1700, Jc::RIGHT],
-            ['Subtotal', 1700, Jc::RIGHT],
-            ['Teknisi', 1800, Jc::LEFT]
+            ['Harga Satuan', 1800, Jc::RIGHT],
+            ['Subtotal', 2000, Jc::RIGHT],
+            ['Penerima / Teknisi', 2400, Jc::LEFT]
         ];
 
+        $headerBg = ($jenisFilter === 'MASUK' ? '198754' : 'DC3545');
+
         foreach ($headers as $h) {
-            $table->addCell($h[1], ['bgColor' => '1F4E78'])->addText($h[0], ['bold' => true, 'color' => 'FFFFFF', 'size' => 9, 'name' => 'Arial'], ['alignment' => $h[2]]);
+            $table->addCell($h[1], ['bgColor' => $headerBg])->addText($h[0], ['bold' => true, 'color' => 'FFFFFF', 'size' => 9, 'name' => 'Arial'], ['alignment' => $h[2]]);
         }
 
         foreach ($riwayats as $index => $r) {
-            $jenis = $r->jenis_transaksi ?? $r->jenis ?? $r->tipe ?? $r->status ?? 'MASUK';
             $subtotal = ($r->jumlah ?? 0) * ($r->harga_satuan ?? 0);
 
             $table->addRow();
             $table->addCell(600)->addText($index + 1, ['size' => 8.5, 'name' => 'Arial'], ['alignment' => Jc::CENTER]);
             $table->addCell(1800)->addText(date('d/m/Y H:i', strtotime($r->created_at)), ['size' => 8.5, 'name' => 'Arial'], ['alignment' => Jc::CENTER]);
             $table->addCell(1600)->addText($r->kode_barang, ['size' => 8.5, 'name' => 'Arial'], ['alignment' => Jc::CENTER]);
-            $table->addCell(3400)->addText($r->nama_barang, ['size' => 8.5, 'bold' => true, 'name' => 'Arial']);
-            $table->addCell(1200)->addText($jenis, ['size' => 8.5, 'bold' => true, 'name' => 'Arial', 'color' => (strtoupper($jenis) === 'MASUK' ? '198754' : 'DC3545')], ['alignment' => Jc::CENTER]);
+            $table->addCell(3600)->addText($r->nama_barang, ['size' => 8.5, 'bold' => true, 'name' => 'Arial']);
             $table->addCell(1400)->addText($r->jumlah . ' ' . $r->satuan, ['size' => 8.5, 'name' => 'Arial'], ['alignment' => Jc::CENTER]);
-            $table->addCell(1700)->addText('Rp ' . number_format($r->harga_satuan ?? 0, 0, ',', '.'), ['size' => 8.5, 'name' => 'Arial'], ['alignment' => Jc::RIGHT]);
-            $table->addCell(1700)->addText('Rp ' . number_format($subtotal, 0, ',', '.'), ['size' => 8.5, 'bold' => true, 'name' => 'Arial'], ['alignment' => Jc::RIGHT]);
-            $table->addCell(1800)->addText($r->penerima ?? '-', ['size' => 8.5, 'name' => 'Arial']);
+            $table->addCell(1800)->addText('Rp ' . number_format($r->harga_satuan ?? 0, 0, ',', '.'), ['size' => 8.5, 'name' => 'Arial'], ['alignment' => Jc::RIGHT]);
+            $table->addCell(2000)->addText('Rp ' . number_format($subtotal, 0, ',', '.'), ['size' => 8.5, 'bold' => true, 'name' => 'Arial'], ['alignment' => Jc::RIGHT]);
+            $table->addCell(2400)->addText($r->penerima ?? '-', ['size' => 8.5, 'name' => 'Arial']);
         }
 
         $objWriter = IOFactory::createWriter($phpWord, 'Word2007');
-        $fileName = 'Rekapan_SIMONI_' . $namaBulanPilihan . '_' . $tahunPilihan . '.docx';
+        $fileName = 'Laporan_' . $jenisFilter . '_Camperniq_' . $namaBulanPilihan . '_' . $tahunPilihan . '.docx';
 
         header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         header('Content-Disposition: attachment;filename="' . $fileName . '"');
